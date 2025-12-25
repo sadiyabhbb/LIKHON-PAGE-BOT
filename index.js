@@ -7,121 +7,61 @@ const app = express().use(bodyParser.json());
 const PAGE_ACCESS_TOKEN = 'EAAKgn1aOproBQeEZCP4LEKW792NGPZAnGjVp1Q4uS4ac33oOgo1q7tx9MVZC0rMXF7pkTarh0GhIZCMJriUDlwpPBL19T1BMyHDeAhwelZCnlHAc7NBKQKNX1PRi0z9zCLQhlp3oXYUdShC0rP7kZBYfN37y8H02LC3iYV0PVh291DnA6Bg0cHSIEZAg9ALLFp53ZAfVk8rAZBgZDZD'; 
 const VERIFY_TOKEN = 'likhon0123'; 
 
-app.get('/', (req, res) => {
-    res.send("Bot Server is Running!");
-});
+app.get('/', (req, res) => res.send("Bot Server is Running!"));
 
-// Webhook Verification
 app.get('/webhook', (req, res) => {
-    console.log("--- WEBHOOK VERIFICATION ATTEMPT ---");
-    let mode = req.query['hub.mode'];
-    let token = req.query['hub.verify_token'];
-    let challenge = req.query['hub.challenge'];
-
-    if (mode && token === VERIFY_TOKEN) {
-        console.log("WEBHOOK_VERIFIED Successfully");
-        res.status(200).send(challenge);
+    if (req.query['hub.verify_token'] === VERIFY_TOKEN) {
+        res.status(200).send(req.query['hub.challenge']);
     } else {
-        console.error("VERIFICATION_FAILED: Token mismatch or missing params");
         res.sendStatus(403);
     }
 });
 
 app.post('/webhook', (req, res) => {
     let body = req.body;
-    
-    // ডাটা রিসিভ হলেই এটি প্রিন্ট হবে
-    console.log("--- NEW WEBHOOK EVENT RECEIVED ---");
-    // console.log(JSON.stringify(body, null, 2)); // সব ডাটা দেখতে চাইলে এটি আনকমেন্ট করুন
 
     if (body.object === 'page') {
-        body.entry.forEach(function(entry) {
-            
-            // ১. মেসেঞ্জার মেসেজ চেক
-            if (entry.messaging && entry.messaging.length > 0) {
-                console.log("Event Type: Messaging (Inbox)");
-                let webhook_event = entry.messaging[0];
-                let sender_psid = webhook_event.sender.id;
-
-                if (webhook_event.message && webhook_event.message.text) {
-                    console.log(`Received Message: "${webhook_event.message.text}" from PSID: ${sender_psid}`);
-                    sendTextMessage(sender_psid, "হ্যালো! আমি আপনার বট।");
+        body.entry.forEach(entry => {
+            // ১. ইনবক্স মেসেজ হ্যান্ডেল
+            if (entry.messaging) {
+                let event = entry.messaging[0];
+                let sender_psid = event.sender.id;
+                console.log("SENDER PSID:", sender_psid); // এটি লগে আপনার আইডি দেখাবে
+                
+                if (event.message && event.message.text) {
+                    sendTextMessage(sender_psid, "আপনার মেসেজ পেয়েছি!");
                 }
             }
 
-            // ২. কমেন্ট বা ফিড চেঞ্জ চেক
+            // ২. কমেন্টে অটো লাইক ও রিপ্লাই
             if (entry.changes) {
-                console.log("Event Type: Feed Change (Comment/Post)");
                 entry.changes.forEach(change => {
-                    console.log(`Change Field: ${change.field}, Verb: ${change.value.verb}, Item: ${change.value.item}`);
-                    
                     if (change.field === 'feed' && change.value.item === 'comment' && change.value.verb === 'add') {
                         let comment_id = change.value.comment_id;
-                        let user_name = change.value.from ? change.value.from.name : "Unknown User";
-                        let comment_text = change.value.message;
-
-                        console.log(`Action: New Comment detected!`);
-                        console.log(`From: ${user_name}`);
-                        console.log(`Text: ${comment_text}`);
-                        console.log(`Comment ID: ${comment_id}`);
                         
-                        sendCommentReaction(comment_id);
+                        // অটো লাইক দেওয়া
+                        axios.post(`https://graph.facebook.com/v21.0/${comment_id}/likes?access_token=${PAGE_ACCESS_TOKEN}`);
+
+                        // কমেন্টে অটো রিপ্লাই দেওয়া
+                        sendCommentReply(comment_id, "ধন্যবাদ কমেন্ট করার জন্য! ❤️");
                     }
                 });
             }
         });
         res.status(200).send('EVENT_RECEIVED');
-    } else {
-        console.error("EVENT_NOT_FROM_PAGE: Object is not 'page'");
-        res.sendStatus(404);
     }
 });
 
-// কমেন্টে লাইক দেওয়ার ফাংশন
-function sendCommentReaction(comment_id) {
-    console.log(`Attempting to like comment: ${comment_id}...`);
-    const url = `https://graph.facebook.com/v21.0/${comment_id}/likes?access_token=${PAGE_ACCESS_TOKEN}`;
-    
-    axios.post(url)
-        .then(() => {
-            console.log(`✅ SUCCESS: Comment ${comment_id} liked successfully.`);
-        })
-        .catch(err => {
-            console.error('❌ REACTION ERROR:');
-            if (err.response) {
-                console.error('Data:', err.response.data);
-            } else {
-                console.error('Message:', err.message);
-            }
-        });
+// কমেন্টে রিপ্লাই দেওয়ার ফাংশন
+function sendCommentReply(comment_id, message) {
+    const url = `https://graph.facebook.com/v21.0/${comment_id}/comments?access_token=${PAGE_ACCESS_TOKEN}`;
+    axios.post(url, { message: message }).catch(err => console.log("Reply Error"));
 }
 
-// মেসেজ পাঠানোর ফাংশন
-function sendTextMessage(sender_psid, response_text) {
-    console.log(`Attempting to send message to ${sender_psid}...`);
+function sendTextMessage(sender_psid, text) {
     const url = `https://graph.facebook.com/v21.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`;
-    const data = {
-        recipient: { id: sender_psid },
-        message: { text: response_text }
-    };
-
-    axios.post(url, data)
-        .then(() => {
-            console.log(`✅ SUCCESS: Message sent to PSID: ${sender_psid}`);
-        })
-        .catch(err => {
-            console.error('❌ SEND MESSAGE ERROR:');
-            if (err.response) {
-                console.error('Data:', err.response.data);
-            } else {
-                console.error('Message:', err.message);
-            }
-        });
+    axios.post(url, { recipient: { id: sender_psid }, message: { text: text } });
 }
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, '0.0.0.0', () => {
-    console.log("=========================================");
-    console.log(`SERVER IS LIVE ON PORT ${PORT}`);
-    console.log("=========================================");
-});
+app.listen(PORT, '0.0.0.0', () => console.log("Server Live"));
