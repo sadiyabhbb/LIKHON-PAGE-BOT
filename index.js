@@ -11,11 +11,9 @@ const MY_PSID = '25704185332538480';
 const randomMessages = [
     "হ্যালো! কমেন্ট করার জন্য ধন্যবাদ। আমরা আপনার সাথে যোগাযোগ করছি।",
     "ধন্যবাদ আমাদের পোস্টে সাড়া দেওয়ার জন্য! আমরা আপনার ইনবক্সে বিস্তারিত পাঠাচ্ছি।",
-    "আপনার কমেন্টটি আমরা পেয়েছি। আমাদের টিম আপনার সাথে শীঘ্রই কথা বলবে!",
-    "হ্যালো! আমাদের পেজে যুক্ত থাকার জন্য ধন্যবাদ। আপনার জন্য একটি বিশেষ অফার আছে!"
+    "আপনার কমেন্টটি আমরা পেয়েছি। আমাদের টিম আপনার সাথে শীঘ্রই কথা বলবে!"
 ];
 
-// ১. রেন্ডার লিংকে ঢুকলে যাতে 'Cannot GET' না দেখায়
 app.get('/', (req, res) => {
     res.send("Bot is Online and Running Successfully! 🚀");
 });
@@ -34,17 +32,17 @@ app.post('/webhook', (req, res) => {
     if (body.object === 'page') {
         body.entry.forEach(entry => {
             
-            // ২. ইনবক্সে মেসেজ দিলে রিপ্লাই (বট যে রান আছে তা বোঝার জন্য)
+            // ইনবক্সে মেসেজ দিলে রিপ্লাই চেক
             if (entry.messaging) {
                 let event = entry.messaging[0];
                 let sender_psid = event.sender.id;
-                
                 if (event.message && event.message.text) {
-                    sendTextMessage(sender_psid, "✅ পেজ বট সফলভাবে কাজ করছে! আপনার মেসেজটি আমরা পেয়েছি।");
+                    console.log(`Message received from: ${sender_psid}`);
+                    sendTextMessage(sender_psid, "✅ পেজ বট সফলভাবে কাজ করছে!");
                 }
             }
 
-            // ৩. কমেন্ট হ্যান্ডেল করে ইনবক্সে মেসেজ পাঠানো
+            // কমেন্ট হ্যান্ডেল করা
             if (entry.changes) {
                 entry.changes.forEach(change => {
                     if (change.field === 'feed' && change.value.item === 'comment' && change.value.verb === 'add') {
@@ -52,10 +50,13 @@ app.post('/webhook', (req, res) => {
                         let commenter_name = change.value.from ? change.value.from.name : "ইউজার";
                         let randomText = randomMessages[Math.floor(Math.random() * randomMessages.length)];
 
+                        console.log(`New comment detected! ID: ${comment_id} by ${commenter_name}`);
+
+                        // ইনবক্সে প্রাইভেট রিপ্লাই পাঠানো
                         sendPrivateReply(comment_id, randomText);
 
-                        let alert_msg = `🔔 নতুন কমেন্ট!\n👤 নাম: ${commenter_name}\n💬 কমেন্ট: ${change.value.message}`;
-                        sendTextMessage(MY_PSID, alert_msg);
+                        // অ্যাডমিনকে জানানো
+                        sendTextMessage(MY_PSID, `🔔 নতুন কমেন্ট!\n👤 নাম: ${commenter_name}\n💬 কমেন্ট: ${change.value.message}`);
                     }
                 });
             }
@@ -64,18 +65,36 @@ app.post('/webhook', (req, res) => {
     }
 });
 
+// ইনবক্সে প্রাইভেট রিপ্লাই পাঠানোর ফাংশন (Error log সহ)
 function sendPrivateReply(comment_id, message) {
     const url = `https://graph.facebook.com/v21.0/${comment_id}/private_replies?access_token=${PAGE_ACCESS_TOKEN}`;
-    axios.post(url, { message: message }).catch(err => console.log("Private reply error"));
+    axios.post(url, { message: message })
+        .then(response => {
+            console.log("✅ Private Reply Sent Successfully!");
+        })
+        .catch(err => {
+            console.log("❌ Private Reply Error:");
+            if (err.response) {
+                // ফেসবুক থেকে আসা আসল সমস্যাটি এখানে প্রিন্ট হবে
+                console.log("Status Code:", err.response.status);
+                console.log("Error Message:", err.response.data.error.message);
+                console.log("Error Type:", err.response.data.error.type);
+            } else {
+                console.log("Network Error:", err.message);
+            }
+        });
 }
 
+// টেক্সট মেসেজ পাঠানোর ফাংশন
 function sendTextMessage(recipient_id, text) {
     const url = `https://graph.facebook.com/v21.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`;
     axios.post(url, {
         recipient: { id: recipient_id },
         message: { text: text }
-    }).catch(err => console.log("Message error"));
+    }).catch(err => {
+        console.log("❌ Message Error:", err.response ? err.response.data.error.message : err.message);
+    });
 }
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("Server Live with Inbox and Comment bot."));
+app.listen(PORT, () => console.log("Server is running. Check logs for details."));
