@@ -6,27 +6,39 @@ const path = require('path');
 
 const app = express().use(bodyParser.json());
 
-// কনফিগারেশন লোড করা
-const loadJSON = (f) => JSON.parse(fs.readFileSync(path.join(__dirname, '..', f), 'utf8'));
+// JSON ফাইল লোড (যেহেতু index.js ফাইলটি বাইরেই আছে, তাই সরাসরি লোড হবে)
+const loadJSON = (f) => JSON.parse(fs.readFileSync(path.join(__dirname, f), 'utf8'));
+
 const state = loadJSON('likhonstate.json');
 const config = loadJSON('config.json');
 
 const PAGE_ACCESS_TOKEN = state.PAGE_ACCESS_TOKEN;
 const PREFIX = config.PREFIX || "/";
 
-// কমান্ড হ্যান্ডলার
+// কমান্ড হ্যান্ডলার (src/cmds ফোল্ডার থেকে লোড হবে)
 const commands = new Map();
-const cmdPath = path.join(__dirname, 'cmds');
-const cmdFiles = fs.readdirSync(cmdPath).filter(file => file.endsWith('.js'));
+const cmdPath = path.join(__dirname, 'src', 'cmds'); 
 
-for (const file of cmdFiles) {
-    const cmd = require(path.join(cmdPath, file));
-    if (cmd.config && cmd.config.name) {
-        commands.set(cmd.config.name, cmd);
+if (fs.existsSync(cmdPath)) {
+    const cmdFiles = fs.readdirSync(cmdPath).filter(file => file.endsWith('.js'));
+    for (const file of cmdFiles) {
+        const cmd = require(path.join(cmdPath, file));
+        if (cmd.config && cmd.config.name) {
+            commands.set(cmd.config.name, cmd);
+            console.log(`✅ Loaded: ${cmd.config.name}`);
+        }
     }
+} else {
+    console.error("❌ 'src/cmds' ফোল্ডারটি পাওয়া যায়নি!");
 }
 
-app.get('/', (req, res) => res.send(`${config.BOTNAME} is running with Module Export Handler! 🚀`));
+app.get('/', (req, res) => res.send(`${config.BOTNAME} is Online! 🚀`));
+
+app.get('/webhook', (req, res) => {
+    if (req.query['hub.verify_token'] === config.VERIFY_TOKEN) {
+        res.status(200).send(req.query['hub.challenge']);
+    } else { res.sendStatus(403); }
+});
 
 app.post('/webhook', (req, res) => {
     let body = req.body;
@@ -37,14 +49,11 @@ app.post('/webhook', (req, res) => {
                     let sender_psid = event.sender.id;
                     if (event.message && event.message.text) {
                         let text = event.message.text.trim();
-
                         if (text.startsWith(PREFIX)) {
                             let args = text.slice(PREFIX.length).split(' ');
                             let commandName = args.shift().toLowerCase();
-
                             if (commands.has(commandName)) {
                                 const cmd = commands.get(commandName);
-                                // কমান্ড রান করা এবং প্যারামিটার পাস করা
                                 const response = await cmd.run({ sender_psid, args, PAGE_ACCESS_TOKEN, config });
                                 if (response) sendTextMessage(sender_psid, response);
                             }
@@ -67,4 +76,4 @@ async function sendTextMessage(recipient_id, text) {
 }
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`🚀 Loaded ${commands.size} commands successfully.`));
+app.listen(PORT, () => console.log(`🚀 Server on ${PORT}. Commands: ${commands.size}`));
