@@ -13,15 +13,14 @@ const loadJSON = (fileName) => {
         if (fs.existsSync(filePath)) {
             return JSON.parse(fs.readFileSync(filePath, 'utf8'));
         }
-        console.error(`❌ ${fileName} পাওয়া যায়নি!`);
         return {};
     } catch (err) {
-        console.error(`❌ ${fileName} লোড করতে সমস্যা:`, err.message);
+        console.error(`❌ Error loading ${fileName}:`, err.message);
         return {};
     }
 };
 
-// কনফিগারেশন লোড
+// কনফিগারেশন এবং স্টেট ফাইল লোড করা
 const state = loadJSON('likhonstate.json');
 const config = loadJSON('config.json');
 
@@ -29,7 +28,7 @@ const PAGE_ACCESS_TOKEN = state.PAGE_ACCESS_TOKEN;
 const VERIFY_TOKEN = config.VERIFY_TOKEN;
 const PREFIX = config.PREFIX || "/";
 
-app.get('/', (req, res) => res.send(`${config.THEME_SETUP?.TITLE || "Bot"} is Online 🚀`));
+app.get('/', (req, res) => res.send(`${config.THEME_SETUP?.TITLE || "Bot"} Server is Live! 🚀`));
 
 // ফেসবুক ওয়েবহুক ভেরিফিকেশন
 app.get('/webhook', (req, res) => {
@@ -40,54 +39,71 @@ app.get('/webhook', (req, res) => {
     }
 });
 
-// ওয়েবহুক মেইন লজিক
+// মেইন ওয়েবহুক লজিক
 app.post('/webhook', (req, res) => {
     let body = req.body;
 
     if (body.object === 'page') {
-        body.entry.forEach(entry => {
+        body.entry.forEach(async (entry) => {
             
             // ১. ইনবক্স মেসেজ হ্যান্ডেল (মেসেঞ্জার বট স্টাইল)
             if (entry.messaging) {
-                entry.messaging.forEach(event => {
+                for (const event of entry.messaging) {
                     let sender_psid = event.sender.id;
                     if (event.message && event.message.text) {
                         let text = event.message.text.trim();
 
-                        // কমান্ড চেক
+                        // কমান্ড চেক (যেমন: /uid)
                         if (text.startsWith(PREFIX)) {
                             let args = text.slice(PREFIX.length).split(' ');
                             let command = args.shift().toLowerCase();
 
-                            if (command === 'id') {
-                                sendTextMessage(sender_psid, `আপনার PSID: ${sender_psid}`);
-                            } else if (command === 'help') {
-                                sendTextMessage(sender_psid, `🤖 ${config.BOTNAME}\n\nউপলব্ধ কমান্ড:\n${PREFIX}id - আপনার আইডি দেখুন\n${PREFIX}info - বটের তথ্য`);
-                            } else if (command === 'info') {
-                                sendTextMessage(sender_psid, `অ্যাডমিন: ${config.THEME_SETUP.ADMIN}\nথিম: ${config.THEME_SETUP.THEME}`);
+                            // আপনার দেওয়া স্টাইলিশ ইউজার ইনফো কমান্ড
+                            if (command === 'uid' || command === 'id') {
+                                try {
+                                    // ইউজারের নাম ফেসবুক থেকে নিয়ে আসা
+                                    const userProfile = await axios.get(`https://graph.facebook.com/v24.0/${sender_psid}?fields=first_name,last_name&access_token=${PAGE_ACCESS_TOKEN}`);
+                                    const fullName = `${userProfile.data.first_name} ${userProfile.data.last_name}`;
+
+                                    const idMessage = `╭─━━━━━━━━━━━━━━━━━━━━━━─╮
+┃ 👤 𝐔𝐒𝐄𝐑 𝐈𝐍𝐅𝐎          ┃
+┃━━━━━━━━━━━━━━━━━━━━━━┃
+┃  🪪 𝐍𝐀𝐌𝐄: ${fullName}
+┃
+┃  🆔 PSID: ${sender_psid}
+┃━━━━━━━━━━━━━━━━━━━━━━┃
+┃ 🤸‍♀️ 𝐁𝐎𝐓 𝐃𝐄𝐕 𝐁𝐘 ${config.THEME_SETUP.ADMIN.toUpperCase()}    ┃
+╰─━━━━━━━━━━━━━━━━━━━━━━─╯`;
+
+                                    sendTextMessage(sender_psid, idMessage);
+                                } catch (err) {
+                                    sendTextMessage(sender_psid, `🆔 আপনার PSID: ${sender_psid}`);
+                                    console.log("Profile Error:", err.message);
+                                }
+                            } 
+                            
+                            else if (command === 'help') {
+                                sendTextMessage(sender_psid, `🤖 ${config.BOTNAME} কমান্ড লিস্ট:\n${PREFIX}uid - আপনার তথ্য\n${PREFIX}info - বটের তথ্য`);
                             }
-                        } else {
-                            // সাধারণ টেক্সট রিপ্লাই
-                            console.log(`Message from ${sender_psid}: ${text}`);
                         }
                     }
-                });
+                }
             }
 
-            // ২. কমেন্ট হ্যান্ডেল (অটো ইনবক্স)
+            // ২. কমেন্ট হ্যান্ডেল (অটো প্রাইভেট রিপ্লাই)
             if (entry.changes) {
                 entry.changes.forEach(change => {
                     if (change.field === 'feed' && change.value.item === 'comment' && change.value.verb === 'add') {
                         let comment_id = change.value.comment_id;
                         let commenter_name = change.value.from ? change.value.from.name : "ইউজার";
-                        let replyMsg = `হ্যালো ${commenter_name}! কমেন্ট করার জন্য ধন্যবাদ। আমরা আপনাকে ইনবক্স করেছি।`;
+                        let msg = `হ্যালো ${commenter_name}! কমেন্ট করার জন্য ধন্যবাদ। আমরা আপনাকে ইনবক্স করেছি।`;
 
                         console.log(`New comment by ${commenter_name}`);
-                        sendPrivateReply(comment_id, replyMsg);
+                        sendPrivateReply(comment_id, msg);
 
-                        // অ্যাডমিনকে নোটিফিকেশন (অ্যাডমিন লিস্টের প্রথম জনকে)
-                        if (config.ADMINS_UID && config.ADMINS_UID.length > 0) {
-                            sendTextMessage(config.ADMINS_UID[0], `🔔 নতুন কমেন্ট!\n👤 নাম: ${commenter_name}\n💬 কমেন্ট: ${change.value.message}`);
+                        // অ্যাডমিনকে নোটিফিকেশন দেওয়া
+                        if (config.ADMINS_UID && config.ADMINS_UID[0]) {
+                            sendTextMessage(config.ADMINS_UID[0], `🔔 নতুন কমেন্ট!\n👤 নাম: ${commenter_name}\n💬: ${change.value.message}`);
                         }
                     }
                 });
@@ -102,13 +118,12 @@ async function sendPrivateReply(comment_id, message) {
     try {
         const url = `https://graph.facebook.com/v24.0/${comment_id}/private_replies?access_token=${PAGE_ACCESS_TOKEN}`;
         await axios.post(url, { message: message });
-        console.log("✅ Private Reply Sent!");
     } catch (err) {
-        console.log("❌ Private Reply Error:", err.response ? err.response.data.error.message : err.message);
+        console.log("❌ Private Reply Error:", err.response?.data?.error?.message || err.message);
     }
 }
 
-// ফাংশন: টেক্সট মেসেজ পাঠানো
+// ফাংশন: মেসেজ পাঠানো
 async function sendTextMessage(recipient_id, text) {
     try {
         const url = `https://graph.facebook.com/v24.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`;
@@ -117,9 +132,9 @@ async function sendTextMessage(recipient_id, text) {
             message: { text: text }
         });
     } catch (err) {
-        console.log("❌ Msg Error:", err.response ? err.response.data.error.message : err.message);
+        console.log("❌ Send Message Error:", err.response?.data?.error?.message || err.message);
     }
 }
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`🚀 ${config.BOTNAME} is running on port ${PORT}`));
+app.listen(PORT, () => console.log(`🚀 ${config.BOTNAME} is live on port ${PORT}`));
