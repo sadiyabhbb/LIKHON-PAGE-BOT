@@ -6,25 +6,32 @@ const path = require('path');
 
 const app = express().use(bodyParser.json());
 
-// JSON ফাইল লোড
+// JSON ফাইল লোড করার ফাংশন
 const loadJSON = (f) => {
     try {
-        return JSON.parse(fs.readFileSync(path.join(__dirname, f), 'utf8'));
+        const filePath = path.join(__dirname, f);
+        if (fs.existsSync(filePath)) {
+            return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+        } else {
+            console.error(`⚠️ Warning: ${f} ফাইলটি পাওয়া যায়নি!`);
+            return {};
+        }
     } catch (e) {
         console.error(`❌ Error loading ${f}:`, e.message);
         return {};
     }
 };
 
-const state = loadJSON('likhonstate.json');
-const config = loadJSON('config.json');
+// ফাইল পাথ (আপনার চাহিদা অনুযায়ী config/config.json)
+const state = loadJSON('likhonstate.json'); 
+const config = loadJSON('config/config.json');
 
 const PAGE_ACCESS_TOKEN = state.PAGE_ACCESS_TOKEN;
 const PREFIX = config.PREFIX || "/";
 
 // কমান্ড হ্যান্ডলার (সরাসরি src ফোল্ডার থেকে লোড হবে)
 const commands = new Map();
-const cmdPath = path.join(__dirname, 'src'); // এখানে 'cmds' বাদ দেওয়া হয়েছে
+const cmdPath = path.join(__dirname, 'src');
 
 if (fs.existsSync(cmdPath)) {
     const cmdFiles = fs.readdirSync(cmdPath).filter(file => file.endsWith('.js'));
@@ -43,14 +50,17 @@ if (fs.existsSync(cmdPath)) {
     console.error("❌ 'src' ফোল্ডারটি পাওয়া যায়নি!");
 }
 
+// হোম রুট
 app.get('/', (req, res) => res.send(`${config.BOTNAME || "Bot"} is Online! 🚀`));
 
+// ফেসবুক ওয়েবহুক ভেরিফিকেশন
 app.get('/webhook', (req, res) => {
     if (req.query['hub.verify_token'] === config.VERIFY_TOKEN) {
         res.status(200).send(req.query['hub.challenge']);
     } else { res.sendStatus(403); }
 });
 
+// মেসেজ হ্যান্ডলিং
 app.post('/webhook', (req, res) => {
     let body = req.body;
     if (body.object === 'page') {
@@ -60,19 +70,30 @@ app.post('/webhook', (req, res) => {
                     let sender_psid = event.sender.id;
                     if (event.message && event.message.text) {
                         let text = event.message.text.trim();
+                        
+                        // কমান্ড চেক করা
                         if (text.startsWith(PREFIX)) {
                             let args = text.slice(PREFIX.length).split(' ');
                             let commandName = args.shift().toLowerCase();
                             
                             if (commands.has(commandName)) {
                                 const cmd = commands.get(commandName);
-                                // কমান্ড রান করার সময় error হ্যান্ডলিং যোগ করা হয়েছে
                                 try {
                                     const response = await cmd.run({ sender_psid, args, PAGE_ACCESS_TOKEN, config });
-                                    if (response) sendTextMessage(sender_psid, response);
+                                    if (response) sendTextMessage(sender_psid, response, PAGE_ACCESS_TOKEN);
                                 } catch (err) {
                                     console.error("Command Execution Error:", err);
                                 }
+                            }
+                        } 
+                        // যদি কমান্ড প্রিক্স ছাড়া কাজ করে (যেমন prefix কমান্ডের ক্ষেত্রে)
+                        else {
+                            let args = text.split(' ');
+                            let commandName = args.shift().toLowerCase();
+                            if (commands.has(commandName) && commands.get(commandName).config.prefix === false) {
+                                const cmd = commands.get(commandName);
+                                const response = await cmd.run({ sender_psid, args, PAGE_ACCESS_TOKEN, config });
+                                if (response) sendTextMessage(sender_psid, response, PAGE_ACCESS_TOKEN);
                             }
                         }
                     }
@@ -83,9 +104,10 @@ app.post('/webhook', (req, res) => {
     }
 });
 
-async function sendTextMessage(recipient_id, text) {
+// টেক্সট মেসেজ পাঠানোর ফাংশন
+async function sendTextMessage(recipient_id, text, token) {
     try {
-        await axios.post(`https://graph.facebook.com/v24.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`, {
+        await axios.post(`https://graph.facebook.com/v24.0/me/messages?access_token=${token}`, {
             recipient: { id: recipient_id },
             message: { text: text }
         });
@@ -95,4 +117,4 @@ async function sendTextMessage(recipient_id, text) {
 }
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`🚀 Server on ${PORT}. Commands: ${commands.size}`));
+app.listen(PORT, () => console.log(`🚀 Server is running on port ${PORT}. Total Commands: ${commands.size}`));
