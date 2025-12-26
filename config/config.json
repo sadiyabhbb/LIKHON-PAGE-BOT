@@ -1,0 +1,16 @@
+{
+  "VERIFY_TOKEN": "LIKHONPAGEBOT",
+  "ADMINS_UID": [
+    "25704185332538480"
+  ],
+  "OWNER_UID": [
+    "25704185332538480"
+  ],
+  "BOTNAME": "LIKHON PAGE BOT",
+  "PREFIX": "/",
+  "THEME_SETUP": {
+    "THEME": "Fiery",
+    "ADMIN": "Likhon",
+    "TITLE": "PAGEBOT"
+  }
+}
