@@ -6,8 +6,15 @@ const path = require('path');
 
 const app = express().use(bodyParser.json());
 
-// JSON ফাইল লোড (যেহেতু index.js ফাইলটি বাইরেই আছে, তাই সরাসরি লোড হবে)
-const loadJSON = (f) => JSON.parse(fs.readFileSync(path.join(__dirname, f), 'utf8'));
+// JSON ফাইল লোড
+const loadJSON = (f) => {
+    try {
+        return JSON.parse(fs.readFileSync(path.join(__dirname, f), 'utf8'));
+    } catch (e) {
+        console.error(`❌ Error loading ${f}:`, e.message);
+        return {};
+    }
+};
 
 const state = loadJSON('likhonstate.json');
 const config = loadJSON('config.json');
@@ -15,24 +22,28 @@ const config = loadJSON('config.json');
 const PAGE_ACCESS_TOKEN = state.PAGE_ACCESS_TOKEN;
 const PREFIX = config.PREFIX || "/";
 
-// কমান্ড হ্যান্ডলার (src/cmds ফোল্ডার থেকে লোড হবে)
+// কমান্ড হ্যান্ডলার (সরাসরি src ফোল্ডার থেকে লোড হবে)
 const commands = new Map();
-const cmdPath = path.join(__dirname, 'src', 'cmds'); 
+const cmdPath = path.join(__dirname, 'src'); // এখানে 'cmds' বাদ দেওয়া হয়েছে
 
 if (fs.existsSync(cmdPath)) {
     const cmdFiles = fs.readdirSync(cmdPath).filter(file => file.endsWith('.js'));
     for (const file of cmdFiles) {
-        const cmd = require(path.join(cmdPath, file));
-        if (cmd.config && cmd.config.name) {
-            commands.set(cmd.config.name, cmd);
-            console.log(`✅ Loaded: ${cmd.config.name}`);
+        try {
+            const cmd = require(path.join(cmdPath, file));
+            if (cmd.config && cmd.config.name) {
+                commands.set(cmd.config.name, cmd);
+                console.log(`✅ Loaded: ${cmd.config.name}`);
+            }
+        } catch (e) {
+            console.error(`❌ Error loading file ${file}:`, e.message);
         }
     }
 } else {
-    console.error("❌ 'src/cmds' ফোল্ডারটি পাওয়া যায়নি!");
+    console.error("❌ 'src' ফোল্ডারটি পাওয়া যায়নি!");
 }
 
-app.get('/', (req, res) => res.send(`${config.BOTNAME} is Online! 🚀`));
+app.get('/', (req, res) => res.send(`${config.BOTNAME || "Bot"} is Online! 🚀`));
 
 app.get('/webhook', (req, res) => {
     if (req.query['hub.verify_token'] === config.VERIFY_TOKEN) {
@@ -52,10 +63,16 @@ app.post('/webhook', (req, res) => {
                         if (text.startsWith(PREFIX)) {
                             let args = text.slice(PREFIX.length).split(' ');
                             let commandName = args.shift().toLowerCase();
+                            
                             if (commands.has(commandName)) {
                                 const cmd = commands.get(commandName);
-                                const response = await cmd.run({ sender_psid, args, PAGE_ACCESS_TOKEN, config });
-                                if (response) sendTextMessage(sender_psid, response);
+                                // কমান্ড রান করার সময় error হ্যান্ডলিং যোগ করা হয়েছে
+                                try {
+                                    const response = await cmd.run({ sender_psid, args, PAGE_ACCESS_TOKEN, config });
+                                    if (response) sendTextMessage(sender_psid, response);
+                                } catch (err) {
+                                    console.error("Command Execution Error:", err);
+                                }
                             }
                         }
                     }
@@ -72,7 +89,9 @@ async function sendTextMessage(recipient_id, text) {
             recipient: { id: recipient_id },
             message: { text: text }
         });
-    } catch (err) { console.log("Send Error"); }
+    } catch (err) { 
+        console.log("Send Error:", err.response ? err.response.data : err.message); 
+    }
 }
 
 const PORT = process.env.PORT || 3000;
