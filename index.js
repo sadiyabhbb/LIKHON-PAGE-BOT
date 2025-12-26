@@ -12,24 +12,22 @@ const loadJSON = (f) => {
         const filePath = path.join(__dirname, f);
         if (fs.existsSync(filePath)) {
             return JSON.parse(fs.readFileSync(filePath, 'utf8'));
-        } else {
-            console.error(`⚠️ Warning: ${f} ফাইলটি পাওয়া যায়নি!`);
-            return {};
         }
+        return {};
     } catch (e) {
         console.error(`❌ Error loading ${f}:`, e.message);
         return {};
     }
 };
 
-// ফাইল পাথ লোড (আপনার চাহিদা অনুযায়ী)
+// ফাইল পাথ (config/config.json)
 const state = loadJSON('likhonstate.json'); 
 const config = loadJSON('config/config.json');
 
 const PAGE_ACCESS_TOKEN = state.PAGE_ACCESS_TOKEN;
 const PREFIX = config.PREFIX || "/";
 
-// কমান্ড হ্যান্ডলার (src ফোল্ডার থেকে)
+// কমান্ড হ্যান্ডলার
 const commands = new Map();
 const cmdPath = path.join(__dirname, 'src');
 
@@ -46,8 +44,6 @@ if (fs.existsSync(cmdPath)) {
             console.error(`❌ Error loading file ${file}:`, e.message);
         }
     }
-} else {
-    console.error("❌ 'src' ফোল্ডারটি পাওয়া যায়নি!");
 }
 
 app.get('/', (req, res) => res.send(`${config.BOTNAME || "Bot"} is Online! 🚀`));
@@ -65,39 +61,32 @@ app.post('/webhook', (req, res) => {
             if (entry.messaging) {
                 entry.messaging.forEach(async (event) => {
                     let sender_psid = event.sender.id;
-                    
                     if (event.message && event.message.text) {
                         let text = event.message.text.trim();
-                        let mid = event.message.mid; // মেসেজ আইডি সংগ্রহ
+                        let mid = event.message.mid; // মেসেজ আইডি
 
-                        // কমান্ড চেক করা (Prefix সহ)
+                        // কমান্ড প্রসেসিং
+                        let commandName = "";
+                        let args = [];
+
                         if (text.startsWith(PREFIX)) {
-                            let args = text.slice(PREFIX.length).split(' ');
-                            let commandName = args.shift().toLowerCase();
-                            
-                            if (commands.has(commandName)) {
-                                const cmd = commands.get(commandName);
-                                try {
-                                    // mid পাঠানো হলো যাতে রিপ্লাই দেওয়া যায়
-                                    const response = await cmd.run({ sender_psid, args, PAGE_ACCESS_TOKEN, config, mid });
-                                    if (response) sendTextMessage(sender_psid, response, PAGE_ACCESS_TOKEN, mid);
-                                } catch (err) {
-                                    console.error("Command Execution Error:", err);
-                                }
-                            }
-                        } 
-                        // Prefix ছাড়া কমান্ড (যেমন: prefix.js এর জন্য)
-                        else {
-                            let args = text.split(' ');
-                            let commandName = args.shift().toLowerCase();
-                            if (commands.has(commandName) && commands.get(commandName).config.prefix === false) {
-                                const cmd = commands.get(commandName);
-                                try {
-                                    const response = await cmd.run({ sender_psid, args, PAGE_ACCESS_TOKEN, config, mid });
-                                    if (response) sendTextMessage(sender_psid, response, PAGE_ACCESS_TOKEN, mid);
-                                } catch (err) {
-                                    console.error(err);
-                                }
+                            args = text.slice(PREFIX.length).split(' ');
+                            commandName = args.shift().toLowerCase();
+                        } else {
+                            args = text.split(' ');
+                            commandName = args.shift().toLowerCase();
+                        }
+
+                        if (commands.has(commandName)) {
+                            const cmd = commands.get(commandName);
+                            // যদি প্রিক্স ছাড়া কমান্ড হয় তবে চেক করা
+                            if (!text.startsWith(PREFIX) && cmd.config.prefix !== false) return;
+
+                            try {
+                                const response = await cmd.run({ sender_psid, args, PAGE_ACCESS_TOKEN, config, mid });
+                                if (response) sendTextMessage(sender_psid, response, PAGE_ACCESS_TOKEN, mid);
+                            } catch (err) {
+                                console.error("Command Error:", err);
                             }
                         }
                     }
@@ -108,23 +97,35 @@ app.post('/webhook', (req, res) => {
     }
 });
 
-// টেক্সট মেসেজ এবং রিপ্লাই ফাংশন
+// টেক্সট মেসেজ এবং অটো-রিপ্লাই ফাংশন
 async function sendTextMessage(recipient_id, text, token, mid = null) {
-    try {
-        const payload = {
-            recipient: { id: recipient_id },
-            message: { text: text },
-            messaging_type: "RESPONSE"
-        };
-
-        // যদি mid থাকে তবে সেটি 'reply_to' হিসেবে যুক্ত হবে
-        if (mid) {
-            payload.message.reply_to = { message_id: mid };
+    const url = `https://graph.facebook.com/v24.0/me/messages?access_token=${token}`;
+    
+    // রিপ্লাই সহ পে-লোড
+    const replyPayload = {
+        recipient: { id: recipient_id },
+        message: { 
+            text: text,
+            reply_to: mid ? { message_id: mid } : undefined
         }
+    };
 
-        await axios.post(`https://graph.facebook.com/v24.0/me/messages?access_token=${token}`, payload);
-    } catch (err) { 
-        console.log("Send Error:", err.response ? JSON.stringify(err.response.data) : err.message); 
+    // সাধারণ পে-লোড (যদি রিপ্লাই ফেল করে)
+    const normalPayload = {
+        recipient: { id: recipient_id },
+        message: { text: text }
+    };
+
+    try {
+        // প্রথমে রিপ্লাই হিসেবে পাঠানোর চেষ্টা করবে
+        await axios.post(url, replyPayload);
+    } catch (err) {
+        // যদি এরর ১০০ (Invalid keys reply_to) আসে, তবে সাধারণ মেসেজ পাঠাবে
+        try {
+            await axios.post(url, normalPayload);
+        } catch (retryErr) {
+            console.log("Final Send Error:", retryErr.message);
+        }
     }
 }
 
