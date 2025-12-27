@@ -6,7 +6,6 @@ const path = require('path');
 
 const app = express().use(bodyParser.json());
 
-// JSON ফাইল লোড করার ফাংশন
 const loadJSON = (f) => {
     try {
         const filePath = path.join(__dirname, f);
@@ -15,19 +14,16 @@ const loadJSON = (f) => {
         }
         return {};
     } catch (e) {
-        console.error(`❌ Error loading ${f}:`, e.message);
         return {};
     }
 };
 
-// ফাইল পাথ (config/config.json)
-const state = loadJSON('likhonstate.json'); 
+const state = loadJSON('PAGE-TOKEN/likhonstate.json'); 
 const config = loadJSON('config/config.json');
 
 const PAGE_ACCESS_TOKEN = state.PAGE_ACCESS_TOKEN;
 const PREFIX = config.PREFIX || "/";
 
-// কমান্ড হ্যান্ডলার
 const commands = new Map();
 const cmdPath = path.join(__dirname, 'src');
 
@@ -41,7 +37,7 @@ if (fs.existsSync(cmdPath)) {
                 console.log(`✅ Loaded: ${cmd.config.name}`);
             }
         } catch (e) {
-            console.error(`❌ Error loading file ${file}:`, e.message);
+            console.error(`❌ Error loading ${file}:`, e.message);
         }
     }
 }
@@ -63,9 +59,7 @@ app.post('/webhook', (req, res) => {
                     let sender_psid = event.sender.id;
                     if (event.message && event.message.text) {
                         let text = event.message.text.trim();
-                        let mid = event.message.mid; // মেসেজ আইডি
-
-                        // কমান্ড প্রসেসিং
+                        let mid = event.message.mid;
                         let commandName = "";
                         let args = [];
 
@@ -79,14 +73,12 @@ app.post('/webhook', (req, res) => {
 
                         if (commands.has(commandName)) {
                             const cmd = commands.get(commandName);
-                            // যদি প্রিক্স ছাড়া কমান্ড হয় তবে চেক করা
                             if (!text.startsWith(PREFIX) && cmd.config.prefix !== false) return;
-
                             try {
                                 const response = await cmd.run({ sender_psid, args, PAGE_ACCESS_TOKEN, config, mid });
                                 if (response) sendTextMessage(sender_psid, response, PAGE_ACCESS_TOKEN, mid);
                             } catch (err) {
-                                console.error("Command Error:", err);
+                                console.error(err);
                             }
                         }
                     }
@@ -97,37 +89,26 @@ app.post('/webhook', (req, res) => {
     }
 });
 
-// টেক্সট মেসেজ এবং অটো-রিপ্লাই ফাংশন
 async function sendTextMessage(recipient_id, text, token, mid = null) {
     const url = `https://graph.facebook.com/v24.0/me/messages?access_token=${token}`;
-    
-    // রিপ্লাই সহ পে-লোড
     const replyPayload = {
         recipient: { id: recipient_id },
-        message: { 
-            text: text,
-            reply_to: mid ? { message_id: mid } : undefined
-        }
+        message: { text: text, reply_to: mid ? { message_id: mid } : undefined }
     };
-
-    // সাধারণ পে-লোড (যদি রিপ্লাই ফেল করে)
     const normalPayload = {
         recipient: { id: recipient_id },
         message: { text: text }
     };
-
     try {
-        // প্রথমে রিপ্লাই হিসেবে পাঠানোর চেষ্টা করবে
         await axios.post(url, replyPayload);
     } catch (err) {
-        // যদি এরর ১০০ (Invalid keys reply_to) আসে, তবে সাধারণ মেসেজ পাঠাবে
         try {
             await axios.post(url, normalPayload);
         } catch (retryErr) {
-            console.log("Final Send Error:", retryErr.message);
+            console.log("Send Error:", retryErr.message);
         }
     }
 }
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`🚀 Server on ${PORT}. Total Commands: ${commands.size}`));
+app.listen(PORT, () => console.log(`🚀 Server on ${PORT}. Commands: ${commands.size}`));
