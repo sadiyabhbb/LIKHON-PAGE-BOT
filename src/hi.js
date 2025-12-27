@@ -1,9 +1,9 @@
 module.exports.config = {
-  name: "hello",
+  name: "hi",
   version: "1.0.0",
   permission: 0,
   credits: "LIKHON",
-  prefix: true,
+  prefix: false,
   description: "Say hello to the bot",
   category: "general",
   usages: "hello",
