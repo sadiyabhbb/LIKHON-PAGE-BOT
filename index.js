@@ -60,6 +60,7 @@ app.post('/webhook', (req, res) => {
                     if (event.message && event.message.text) {
                         let text = event.message.text.trim();
                         let mid = event.message.mid;
+                        
                         let commandName = "";
                         let args = [];
 
@@ -73,7 +74,12 @@ app.post('/webhook', (req, res) => {
 
                         if (commands.has(commandName)) {
                             const cmd = commands.get(commandName);
-                            if (!text.startsWith(PREFIX) && cmd.config.prefix !== false) return;
+                            const isPrefixRequired = cmd.config.prefix;
+
+                            if (isPrefixRequired === true && !text.startsWith(PREFIX)) {
+                                return;
+                            }
+
                             try {
                                 const response = await cmd.run({ sender_psid, args, PAGE_ACCESS_TOKEN, config, mid });
                                 if (response) sendTextMessage(sender_psid, response, PAGE_ACCESS_TOKEN, mid);
